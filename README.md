@@ -1,157 +1,102 @@
-## Distributed Load Testing Using Kubernetes
+## 运用Kubernetes进行分布式负载测试
 
-This tutorial demonstrates how to conduct distributed load testing using [Kubernetes](http://kubernetes.io) and includes a sample web application, Docker image, and Kubernetes controllers/services. For more background refer to the [Distributed Load Testing Using Kubernetes](http://cloud.google.com/solutions/distributed-load-testing-using-kubernetes) solution paper.
+该教程描述如何在[Kubernetes](http://kubernetes.io)中进行分布式负载均衡测试，包括一个web应用、docker镜像和Kubernetes controllers/services。更多资料请查看[Distributed Load Testing Using Kubernetes](http://cloud.google.com/solutions/distributed-load-testing-using-kubernetes) 。
 
-## Prerequisites
+## 准备
 
-* Google Cloud Platform account
-* Install and setup [Google Cloud SDK](https://cloud.google.com/sdk/)
+**不需要GCE及其他组件，你只需要有一个kubernetes集群即可。**
 
-**Note:** when installing the Google Cloud SDK you will need to enable the following additional components:
+如果你还没有kubernetes集群，可以参考[kubernetes-handbook](https://www.gitbook.com/book/rootsongjc/kubernetes-handbook)部署一个。
 
-* `App Engine Command Line Interface (Preview)`
-* `App Engine SDK for Python and PHP`
-* `Compute Engine Command Line Interface`
-* `Developer Preview gcloud Commands`
-* `gcloud Alpha Commands`
-* `gcloud app Python Extensions`
-* `kubectl`
+## 部署Web应用
 
-Before continuing, you can also set your preferred zone and project:
+ `sample-webapp` 目录下包含一个简单的web测试应用。我们将其构建为docker镜像，在kubernetes中运行。你可以自己构建，也可以直接用这个我构建好的镜像`index.tenxcloud.com/jimmy/k8s-sample-webapp:latest`。
 
-    $ gcloud config set compute/zone ZONE
-    $ gcloud config set project PROJECT-ID
+在kubernetes上部署sample-webapp。
 
-## Deploy Web Application
+```bash
+$ cd kubernetes-config
+$ kubectl create -f sample-webapp-controller.yaml
+$ kubectl create -f kubectl create -f sample-webapp-service.yaml
+```
 
-The `sample-webapp` folder contains a simple Google App Engine Python application as the "system under test". To deploy the application to your project use the `gcloud preview app deploy` command.
+## 部署Locust的Controller和Service
 
-    $ gcloud preview app deploy sample-webapp/app.yaml --project=PROJECT-ID --set-default
-
-**Note:** you will need the URL of the deployed sample web application when deploying the `locust-master` and `locust-worker` controllers.
-
-## Deploy Controllers and Services
-
-Before deploying the `locust-master` and `locust-worker` controllers, update each to point to the location of your deployed sample web application. Set the `TARGET_HOST` environment variable found in the `spec.template.spec.containers.env` field to your sample web application URL.
+`locust-master`和`locust-work`使用同样的docker镜像，修改cotnroller中`spec.template.spec.containers.env`字段中的value为你`sample-webapp` service的名字。
 
     - name: TARGET_HOST
-      key: TARGET_HOST
-      value: http://PROJECT-ID.appspot.com
+      value: http://sample-webapp:8000
 
-### Update Controller Docker Image (Optional)
+### 创建Controller Docker镜像（可选）
 
-The `locust-master` and `locust-worker` controllers are set to use the pre-built `locust-tasks` Docker image, which has been uploaded to the [Google Container Registry](http://gcr.io) and is available at `gcr.io/cloud-solutions-images/locust-tasks`. If you are interested in making changes and publishing a new Docker image, refer to the following steps.
+`locust-master`和`locust-work` controller使用的都是`locust-tasks` docker镜像。你可以直接下载`gcr.io/cloud-solutions-images/locust-tasks`，也可以自己编译。自己编译大概要花几分钟时间，镜像大小为820M。
 
-First, [install Docker](https://docs.docker.com/installation/#installation) on your platform. Once Docker is installed and you've made changes to the `Dockerfile`, you can build, tag, and upload the image using the following steps:
+    $ docker build -t index.tenxcloud.com/jimmy/locust-tasks:latest .
+    $ docker push index.tenxcloud.com/jimmy/locust-tasks:latest
 
-    $ docker build -t USERNAME/locust-tasks .
-    $ docker tag USERNAME/locust-tasks gcr.io/PROJECT-ID/locust-tasks
-    $ gcloud preview docker --project PROJECT-ID push gcr.io/PROJECT-ID/locust-tasks
+**注意**：我使用的是时速云的镜像仓库。
 
-**Note:** you are not required to use the Google Container Registry. If you'd like to publish your images to the [Docker Hub](https://hub.docker.com) please refer to the steps in [Working with Docker Hub](https://docs.docker.com/userguide/dockerrepos/).
+每个controller的yaml的`spec.template.spec.containers.image` 字段指定的是我的镜像：
 
-Once the Docker image has been rebuilt and uploaded to the registry you will need to edit the controllers with your new image location. Specifically, the `spec.template.spec.containers.image` field in each controller controls which Docker image to use.
+    image: index.tenxcloud.com/jimmy/locust-tasks:latest
+### 部署locust-master
 
-If you uploaded your Docker image to the Google Container Registry:
+```bash
+$ kubectl create -f locust-master-controller.yaml
+$ kubectl create -f locust-master-service.yaml
+```
 
-    image: gcr.io/PROJECT-ID/locust-tasks:latest
-
-If you uploaded your Docker image to the Docker Hub:
-
-    image: USERNAME/locust-tasks:latest
-
-**Note:** the image location includes the `latest` tag so that the image is pulled down every time a new Pod is launched. To use a Kubernetes-cached copy of the image, remove `:latest` from the image location.
-
-### Deploy Kubernetes Cluster
-
-First create the [Google Container Engine](http://cloud.google.com/container-engine) cluster using the `gcloud` command as shown below. 
-
-**Note:** This command defaults to creating a three node Kubernetes cluster (not counting the master) using the `n1-standard-1` machine type. Refer to the [`gcloud alpha container clusters create`](https://cloud.google.com/sdk/gcloud/reference/alpha/container/clusters/create) documentation information on specifying a different cluster configuration.
-
-    $ gcloud alpha container clusters create CLUSTER-NAME
-
-After a few minutes, you'll have a working Kubernetes cluster with three nodes (not counting the Kubernetes master). Next, configure your system to use the `kubectl` command:
-
-    $ kubectl config use-context gke_PROJECT-ID_ZONE_CLUSTER-NAME
-
-**Note:** the output from the previous `gcloud` cluster create command will contain the specific `kubectl config` command to execute for your platform/project.
-
-### Deploy locust-master
-
-Now that `kubectl` is setup, deploy the `locust-master-controller`:
-
-    $ kubectl create -f locust-master-controller.yaml
-
-To confirm that the Replication Controller and Pod are created, run the following:
-
-    $ kubectl get rc
-    $ kubectl get pods -l name=locust,role=master
-
-Next, deploy the `locust-master-service`:
-
-    $ kubectl create -f locust-master-service.yaml
-
-This step will expose the Pod with an internal DNS name (`locust-master`) and ports `8089`, `5557`, and `5558`. As part of this step, the `type: LoadBalancer` directive in `locust-master-service.yaml` will tell Google Container Engine to create a Google Compute Engine forwarding-rule from a publicly avaialble IP address to the `locust-master` Pod. To view the newly created forwarding-rule, execute the following:
-
-    $ gcloud compute forwarding-rules list 
-
-### Deploy locust-worker
+### 部署locust-worker
 
 Now deploy `locust-worker-controller`:
 
-    $ kubectl create -f locust-worker-controller.yaml
+```bash
+$ kubectl create -f locust-worker-controller.yaml
+```
+你可以很轻易的给work扩容，通过命令行方式：
 
-The `locust-worker-controller` is set to deploy 10 `locust-worker` Pods, to confirm they were deployed run the following:
+```ba sh
+$ kubectl scale --replicas=20 replicationcontrollers locust-worker
+```
+当然你也可以通过WebUI：Dashboard - Workloads - Replication Controllers - **ServiceName** - Scale来扩容。
 
-    $ kubectl get pods -l name=locust,role=worker
+![dashboard-scale](images/dashbaord-scale.jpg)
 
-To scale the number of `locust-worker` Pods, issue a replication controller `scale` command.
+### 配置Traefik
 
-    $ kubectl scale --replicas=20 replicationcontrollers locust-worker
+参考[kubernetes的traefik ingress安装](http://rootsongjc.github.io/blogs/traefik-ingress-installation/)，在`ingress.yaml`中加入如下配置：
 
-To confirm that the Pods have launched and are ready, get the list of `locust-worker` Pods:
+```Yaml
+  - host: traefik.locust.io
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: locust-master
+          servicePort: 8089
+```
 
-    $ kubectl get pods -l name=locust,role=worker
+然后执行`kubectl replace -f ingress.yaml`即可更新traefik。
 
-**Note:** depending on the desired number of `locust-worker` Pods, the Kubernetes cluster may need to be launched with more than 3 compute engine nodes and may also need a machine type more powerful than n1-standard-1. Refer to the [`gcloud alpha container clusters create`](https://cloud.google.com/sdk/gcloud/reference/alpha/container/clusters/create) documentation for more information.
+通过Traefik的dashboard就可以看到刚增加的`traefik.locust.io`节点。
 
-### Setup Firewall Rules
+![traefik-dashboard-locust](images/traefik-dashboard-locust.jpg)
 
-The final step in deploying these controllers and services is to allow traffic from your publicly accessible forwarding-rule IP address to the appropriate Container Engine instances.
+## 执行测试
 
-The only traffic we need to allow externally is to the Locust web interface, running on the `locust-master` Pod at port `8089`. First, get the target tags for the nodes in your Kubernetes cluster using the output from `kubectl get nodes`:
+打开`http://traefik.locust.io`页面，点击`Edit`输入伪造的用户数和用户每秒发送的请求个数，点击`Start Swarming`就可以开始测试了。
 
-    $ kubectl get nodes
-    NAME                        LABELS                                             STATUS
-    gke-ws-0e365264-node-4pdw   kubernetes.io/hostname=gke-ws-0e365264-node-4pdw   Ready
-    gke-ws-0e365264-node-jdcz   kubernetes.io/hostname=gke-ws-0e365264-node-jdcz   Ready
-    gke-ws-0e365264-node-kp3d   kubernetes.io/hostname=gke-ws-0e365264-node-kp3d   Ready
+![locust-start-swarming](images/locust-start-swarming.jpg)
 
-The target tag is the node name prefix up to `-node` and is formatted as `gke-CLUSTER-NAME-[...]-node`. For example, if your node name is `gke-mycluster-12345678-node-abcd`, the target tag would be `gke-mycluster-12345678-node`. 
+在测试过程中调整`sample-webapp`的pod个数（默认设置了1个pod），观察pod的负载变化情况。
 
-Now to create the firewall rule, execute the following:
+![sample-webapp-rc](images/sample-webapp-rc.jpg)
 
-    $ gcloud compute firewall-rules create FIREWALL-RULE-NAME --allow=tcp:8089 --target-tags gke-CLUSTER-NAME-[...]-node
+从一段时间的观察中可以看到负载被平均分配给了3个pod。
 
-## Execute Tests
+在locust的页面中可以实时观察也可以下载测试结果。
 
-To execute the Locust tests, navigate to the IP address of your forwarding-rule (see above) and port `8089` and enter the number of clients to spawn and the client hatch rate then start the simulation.
-
-## Deployment Cleanup
-
-To teardown the workload simulation cluster, use the following steps. First, delete the Kubernetes cluster:
-
-    $ gcloud alpha container clusters delete CLUSTER-NAME
-
-Next, delete the forwarding rule that forwards traffic into the cluster.
-
-    $ gcloud compute forwarding-rules delete FORWARDING-RULE-NAME
-
-Finally, delete the firewall rule that allows incoming traffic to the cluster.
-
-    $ gcloud compute firewall-rules delete FIREWALL-RULE-NAME
-
-To delete the sample web application, visit the [Google Cloud Console](https://console.developers.google.com).
+![locust-dashboard](images/locust-dashboard.jpg)
 
 ## License
 
