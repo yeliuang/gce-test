@@ -33,7 +33,7 @@ spec:
     spec:
       containers:
         - name: locust
-          image: index.tenxcloud.com/jimmy/locust-tasks:latest
+          image: gcr.io/cloud-solutions-images/locust-tasks:latest
           env:
             - name: LOCUST_MODE
               value: worker
