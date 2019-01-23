@@ -51,3 +51,10 @@ spec:
         backend:
           serviceName: monocular-monocular-api
           servicePort: 80
+  - host: traefik.locust.io
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: locust-master
+          servicePort: 8089
