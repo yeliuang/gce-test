@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Service    ## 声明是Kubernetes的service文件
+metadata:
+  name: mysql    ## service的全局唯一名称
+spec:
+  ports:
+    - port: 3306  ## 服务暴露的端口号
+  selector:       ## service对应的Pod标签名称
+    app: mysql
